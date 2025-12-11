@@ -291,7 +291,7 @@ $sort = isset($_GET['sort']) ? $_GET['sort'] : 'deadline';
             box-shadow: 0 2px 8px rgba(0,0,0,0.1);
             margin-bottom: 30px;
         }
-        .section.hidden {
+        .section-container.hidden {
             display: none;
         }
         .section-header {
@@ -886,8 +886,8 @@ $sort = isset($_GET['sort']) ? $_GET['sort'] : 'deadline';
             </div>
         </div>
         <div class="header-nav">
-            <button class="nav-item active" onclick="showSection('tasks')">Tasks</button>
-            <button class="nav-item" onclick="showSection('visits')">Visits</button>
+            <button class="nav-item active" onclick="showSection('tasks', event)">Tasks</button>
+            <button class="nav-item" onclick="showSection('visits', event)">Visits</button>
         </div>
     </div>
 
@@ -1418,7 +1418,7 @@ $sort = isset($_GET['sort']) ? $_GET['sort'] : 'deadline';
         let currentView = 'table';
         
         // Section Management
-        function showSection(section) {
+        function showSection(section, event) {
             const sections = document.querySelectorAll('.section-container');
             sections.forEach(s => s.classList.add('hidden'));
             
@@ -1426,7 +1426,9 @@ $sort = isset($_GET['sort']) ? $_GET['sort'] : 'deadline';
             navItems.forEach(item => item.classList.remove('active'));
             
             document.getElementById(section + '-section').classList.remove('hidden');
-            event.target.classList.add('active');
+            if (event && event.target) {
+                event.target.classList.add('active');
+            }
         }
         
         // Task Functions

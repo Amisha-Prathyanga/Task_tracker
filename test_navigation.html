@@ -1,0 +1,70 @@
+<!DOCTYPE html>
+<html>
+
+<head>
+    <title>Navigation Test</title>
+    <style>
+        .section-container {
+            padding: 20px;
+            border: 2px solid #ccc;
+            margin: 10px;
+        }
+
+        .hidden {
+            display: none;
+        }
+
+        .nav-item {
+            padding: 10px 20px;
+            margin: 5px;
+            cursor: pointer;
+        }
+
+        .nav-item.active {
+            background: #007bff;
+            color: white;
+        }
+    </style>
+</head>
+
+<body>
+    <div>
+        <button class="nav-item active" onclick="showSection('tasks', event)">Tasks</button>
+        <button class="nav-item" onclick="showSection('visits', event)">Visits</button>
+    </div>
+
+    <div id="tasks-section" class="section-container">
+        <h2>Tasks Section</h2>
+        <p>This is the tasks section content.</p>
+    </div>
+
+    <div id="visits-section" class="section-container hidden">
+        <h2>Visits Section</h2>
+        <p>This is the visits section content.</p>
+    </div>
+
+    <script>
+        function showSection(section, event) {
+            console.log('showSection called with:', section, event);
+
+            const sections = document.querySelectorAll('.section-container');
+            sections.forEach(s => s.classList.add('hidden'));
+
+            const navItems = document.querySelectorAll('.nav-item');
+            navItems.forEach(item => item.classList.remove('active'));
+
+            const targetSection = document.getElementById(section + '-section');
+            console.log('Target section:', targetSection);
+
+            if (targetSection) {
+                targetSection.classList.remove('hidden');
+            }
+
+            if (event && event.target) {
+                event.target.classList.add('active');
+            }
+        }
+    </script>
+</body>
+
+</html>
