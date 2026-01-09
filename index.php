@@ -2,6 +2,26 @@
 require_once 'config.php';
 requireLogin();
 
+// Check and create meetings table if it doesn't exist
+$table_check = $conn->query("SHOW TABLES LIKE 'meetings'");
+if ($table_check->num_rows == 0) {
+    $sql = "CREATE TABLE meetings (
+        id INT(11) UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+        user_id INT(11) NOT NULL,
+        title VARCHAR(255) NOT NULL,
+        meeting_date DATE NOT NULL,
+        time_from TIME NOT NULL,
+        time_to TIME NOT NULL,
+        platform VARCHAR(100) NOT NULL,
+        link VARCHAR(500) DEFAULT NULL,
+        status VARCHAR(50) DEFAULT 'Scheduled',
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    )";
+    if ($conn->query($sql) !== TRUE) {
+        die("Error creating table: " . $conn->error);
+    }
+}
+
 // Handle task operations
 if ($_SERVER['REQUEST_METHOD'] == 'POST') {
     if (isset($_POST['action'])) {
@@ -45,6 +65,35 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST') {
             $stmt->bind_param("ii", $_POST['task_id'], $user_id);
             $stmt->execute();
             $stmt->close();
+            $stmt->execute();
+            $stmt->close();
+        } elseif ($_POST['action'] == 'bulk_delete') {
+            $ids = json_decode($_POST['task_ids']);
+            if (!empty($ids)) {
+                $placeholders = str_repeat('?,', count($ids) - 1) . '?';
+                $types = str_repeat('i', count($ids) + 1); // +1 for user_id
+                $params = array_merge($ids, [$user_id]);
+                
+                $stmt = $conn->prepare("DELETE FROM tasks WHERE id IN ($placeholders) AND user_id=?");
+                $stmt->bind_param($types, ...$params);
+                $stmt->execute();
+                $stmt->close();
+            }
+        } elseif ($_POST['action'] == 'bulk_status') {
+            $ids = json_decode($_POST['task_ids']);
+            $status = $_POST['status'];
+            $completion = $status == 'Completed' ? 100 : ($status == 'In Progress' ? 50 : 0);
+            
+            if (!empty($ids)) {
+                $placeholders = str_repeat('?,', count($ids) - 1) . '?';
+                $types = 'si' . str_repeat('i', count($ids) + 1); // s(status), i(completion), i...(ids), i(user_id)
+                $params = array_merge([$status, $completion], $ids, [$user_id]);
+                
+                $stmt = $conn->prepare("UPDATE tasks SET status=?, completion=? WHERE id IN ($placeholders) AND user_id=?");
+                $stmt->bind_param($types, ...$params);
+                $stmt->execute();
+                $stmt->close();
+            }
         } elseif ($_POST['action'] == 'quick_status') {
             $stmt = $conn->prepare("UPDATE tasks SET status=?, completion=? WHERE id=? AND user_id=?");
             $completion = $_POST['status'] == 'Completed' ? 100 : ($_POST['status'] == 'In Progress' ? 50 : 0);
@@ -83,6 +132,41 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST') {
             $stmt->bind_param("ii", $_POST['visit_id'], $user_id);
             $stmt->execute();
             $stmt->close();
+            $stmt->close();
+        } elseif ($_POST['action'] == 'add_meeting') {
+            $stmt = $conn->prepare("INSERT INTO meetings (user_id, title, meeting_date, time_from, time_to, platform, link, status) VALUES (?, ?, ?, ?, ?, ?, ?, ?)");
+            $stmt->bind_param("isssssss", 
+                $user_id,
+                $_POST['title'],
+                $_POST['meeting_date'],
+                $_POST['time_from'],
+                $_POST['time_to'],
+                $_POST['platform'],
+                $_POST['link'],
+                $_POST['status']
+            );
+            $stmt->execute();
+            $stmt->close();
+        } elseif ($_POST['action'] == 'edit_meeting') {
+            $stmt = $conn->prepare("UPDATE meetings SET title=?, meeting_date=?, time_from=?, time_to=?, platform=?, link=?, status=? WHERE id=? AND user_id=?");
+            $stmt->bind_param("sssssssii",
+                $_POST['title'],
+                $_POST['meeting_date'],
+                $_POST['time_from'],
+                $_POST['time_to'],
+                $_POST['platform'],
+                $_POST['link'],
+                $_POST['status'],
+                $_POST['meeting_id'],
+                $user_id
+            );
+            $stmt->execute();
+            $stmt->close();
+        } elseif ($_POST['action'] == 'delete_meeting') {
+            $stmt = $conn->prepare("DELETE FROM meetings WHERE id=? AND user_id=?");
+            $stmt->bind_param("ii", $_POST['meeting_id'], $user_id);
+            $stmt->execute();
+            $stmt->close();
         }
         header("Location: index.php");
         exit();
@@ -94,7 +178,11 @@ $user_id = $_SESSION['user_id'];
 $result = $conn->query("SELECT * FROM tasks WHERE user_id=$user_id ORDER BY deadline ASC");
 
 // Fetch all visits
+// Fetch all visits
 $visits_result = $conn->query("SELECT * FROM visits WHERE user_id=$user_id ORDER BY visit_date DESC, time_from DESC");
+
+// Fetch all meetings
+$meetings_result = $conn->query("SELECT * FROM meetings WHERE user_id=$user_id ORDER BY meeting_date ASC, time_from ASC");
 
 // Get filter and sort from URL
 $filter = isset($_GET['filter']) ? $_GET['filter'] : 'all';
@@ -814,6 +902,41 @@ $sort = isset($_GET['sort']) ? $_GET['sort'] : 'deadline';
             color: #666;
             line-height: 1.5;
         }
+        .meeting-card {
+            background: #fff;
+            border-left: 4px solid #673ab7;
+            padding: 20px;
+            border-radius: 12px;
+            margin-bottom: 15px;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.05);
+            transition: all 0.3s;
+        }
+        .meeting-card:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 4px 12px rgba(0,0,0,0.1);
+        }
+        .meeting-platform {
+            display: inline-block;
+            padding: 4px 10px;
+            background: #ede7f6;
+            color: #673ab7;
+            border-radius: 6px;
+            font-size: 12px;
+            font-weight: 600;
+            margin-top: 5px;
+        }
+        .meeting-link {
+            color: #1e3c72;
+            text-decoration: none;
+            font-size: 13px;
+            display: flex;
+            align-items: center;
+            gap: 5px;
+            margin-top: 8px;
+        }
+        .meeting-link:hover {
+            text-decoration: underline;
+        }
         .btn-export {
             background: linear-gradient(135deg, #43a047 0%, #66bb6a 100%);
             color: white;
@@ -870,7 +993,7 @@ $sort = isset($_GET['sort']) ? $_GET['sort'] : 'deadline';
             <div class="header-brand">
                 <div class="icon">📋</div>
                 <div>
-                    <h1>Task Tracker Pro</h1>
+                    <h1>Task Tracker</h1>
                     <div class="subtitle">Productivity & Management Suite</div>
                 </div>
             </div>
@@ -879,7 +1002,7 @@ $sort = isset($_GET['sort']) ? $_GET['sort'] : 'deadline';
                     <div class="user-avatar"><?php echo strtoupper(substr($_SESSION['username'], 0, 1)); ?></div>
                     <div class="user-info">
                         <div class="name"><?php echo htmlspecialchars($_SESSION['username']); ?></div>
-                        <div class="role">Administrator</div>
+                        <!-- <div class="role">Administrator</div> -->
                     </div>
                 </div>
                 <a href="logout.php" class="btn btn-logout">Logout</a>
@@ -888,6 +1011,7 @@ $sort = isset($_GET['sort']) ? $_GET['sort'] : 'deadline';
         <div class="header-nav">
             <button class="nav-item active" onclick="showSection('tasks', event)">Tasks</button>
             <button class="nav-item" onclick="showSection('visits', event)">Visits</button>
+            <button class="nav-item" onclick="showSection('meetings', event)">Meetings</button>
         </div>
     </div>
 
@@ -903,7 +1027,13 @@ $sort = isset($_GET['sort']) ? $_GET['sort'] : 'deadline';
         
         $total_visits = $visits_result->num_rows;
         $today_visits = $conn->query("SELECT COUNT(*) as count FROM visits WHERE user_id=$user_id AND visit_date = CURDATE()")->fetch_assoc()['count'];
+        $total_visits = $visits_result->num_rows;
+        $today_visits = $conn->query("SELECT COUNT(*) as count FROM visits WHERE user_id=$user_id AND visit_date = CURDATE()")->fetch_assoc()['count'];
         $this_week_visits = $conn->query("SELECT COUNT(*) as count FROM visits WHERE user_id=$user_id AND YEARWEEK(visit_date) = YEARWEEK(CURDATE())")->fetch_assoc()['count'];
+        
+        $total_meetings = $meetings_result->num_rows;
+        $today_meetings = $conn->query("SELECT COUNT(*) as count FROM meetings WHERE user_id=$user_id AND meeting_date = CURDATE()")->fetch_assoc()['count'];
+        $upcoming_meetings = $conn->query("SELECT COUNT(*) as count FROM meetings WHERE user_id=$user_id AND meeting_date >= CURDATE()")->fetch_assoc()['count'];
         ?>
         
         <!-- Tasks Section -->
@@ -937,6 +1067,11 @@ $sort = isset($_GET['sort']) ? $_GET['sort'] : 'deadline';
                     <div class="header-controls">
                         <div class="search-box">
                             <input type="text" id="searchInput" placeholder="Search tasks..." onkeyup="searchTasks()">
+                        </div>
+                        <div class="date-filter">
+                            <input type="date" id="taskDateFrom" onchange="filterTasksByDate()">
+                            <span>to</span>
+                            <input type="date" id="taskDateTo" onchange="filterTasksByDate()">
                         </div>
                         <select class="sort-dropdown" id="sortSelect" onchange="sortTasks()">
                             <option value="deadline">Sort by Deadline</option>
@@ -1041,7 +1176,7 @@ $sort = isset($_GET['sort']) ? $_GET['sort'] : 'deadline';
                             <thead>
                                 <tr>
                                     <th class="checkbox-cell">
-                                        <input type="checkbox" class="task-checkbox" onchange="toggleAllCheckboxes(this, '<?php echo $category; ?>')">
+                                        <input type="checkbox" class="master-checkbox" onchange="toggleAllCheckboxes(this, '<?php echo $category; ?>')">
                                     </th>
                                     <th onclick="sortTableBy('date', '<?php echo $category; ?>')">Date ⇅</th>
                                     <th onclick="sortTableBy('project', '<?php echo $category; ?>')">Project ⇅</th>
@@ -1279,6 +1414,99 @@ $sort = isset($_GET['sort']) ? $_GET['sort'] : 'deadline';
         </div>
     </div>
 
+    <!-- Meetings Section -->
+    <div id="meetings-section" class="section-container hidden">
+        <div class="stats">
+            <div class="stat-card">
+                <h3>Total Meetings</h3>
+                <div class="number"><?php echo $total_meetings; ?></div>
+                <div class="trend">📅 All scheduled</div>
+            </div>
+            <div class="stat-card">
+                <h3>Today</h3>
+                <div class="number"><?php echo $today_meetings; ?></div>
+                <div class="trend">📍 Today's schedule</div>
+            </div>
+            <div class="stat-card">
+                <h3>Upcoming</h3>
+                <div class="number"><?php echo $upcoming_meetings; ?></div>
+                <div class="trend">🔜 Future meetings</div>
+            </div>
+        </div>
+
+        <div class="section">
+            <div class="section-header">
+                <h2>Meetings & Calls</h2>
+                <div class="header-controls">
+                    <div class="search-box">
+                        <input type="text" id="meetingSearchInput" placeholder="Search meetings..." onkeyup="searchMeetings()">
+                    </div>
+                    <div class="date-filter">
+                        <input type="date" id="meetingDateFrom" placeholder="From">
+                        <span>to</span>
+                        <input type="date" id="meetingDateTo" placeholder="To">
+                        <button class="btn btn-add" onclick="filterMeetingsByDate()">Filter</button>
+                        <button class="btn btn-cancel" onclick="clearMeetingFilter()">Clear</button>
+                    </div>
+                    <div class="export-dropdown">
+                        <button class="btn btn-export" onclick="toggleExportMenu('meeting')">
+                            📥 Export
+                        </button>
+                        <div class="export-menu" id="meetingExportMenu">
+                            <div class="export-option" onclick="exportMeetings('pdf')">
+                                <span class="export-icon">📄</span>
+                                <span>Export as PDF</span>
+                            </div>
+                            <div class="export-option" onclick="exportMeetings('excel')">
+                                <span class="export-icon">📊</span>
+                                <span>Export as Excel</span>
+                            </div>
+                        </div>
+                    </div>
+                    <button class="btn btn-add" onclick="openMeetingModal()">+ Add Meeting</button>
+                </div>
+            </div>
+            
+            <div id="meetingsContainer">
+                <?php 
+                if ($total_meetings > 0):
+                    while ($meeting = $meetings_result->fetch_assoc()): 
+                ?>
+                <div class="meeting-card" data-meeting-date="<?php echo $meeting['meeting_date']; ?>">
+                    <div class="visit-header">
+                        <div class="visit-date-time">
+                            <strong style="font-size: 16px; color: #333;"><?php echo htmlspecialchars($meeting['title']); ?></strong>
+                            <div class="visit-date" style="font-size: 14px; margin-top: 4px;">📅 <?php echo date('l, F d, Y', strtotime($meeting['meeting_date'])); ?></div>
+                            <div class="visit-time">🕒 <?php echo date('g:i A', strtotime($meeting['time_from'])); ?> - <?php echo date('g:i A', strtotime($meeting['time_to'])); ?></div>
+                        </div>
+                        <div class="actions">
+                            <button class="btn-small btn-edit" onclick='editMeeting(<?php echo json_encode($meeting); ?>)'>Edit</button>
+                            <button class="btn-small btn-delete" onclick="deleteMeeting(<?php echo $meeting['id']; ?>)">Delete</button>
+                        </div>
+                    </div>
+                    <div class="meeting-platform"><?php echo htmlspecialchars($meeting['platform']); ?></div>
+                    <?php if(!empty($meeting['link'])): ?>
+                    <a href="<?php echo htmlspecialchars($meeting['link']); ?>" target="_blank" class="meeting-link">
+                        🔗 Join Meeting
+                    </a>
+                    <?php endif; ?>
+                </div>
+                <?php 
+                    endwhile;
+                else: 
+                ?>
+                <div class="empty-state">
+                    <svg fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 10l4.553-2.276A1 1 0 0121 8.618v6.764a1 1 0 01-1.447.894L15 14M5 18h8a2 2 0 002-2V8a2 2 0 00-2-2H5a2 2 0 00-2 2v8a2 2 0 002 2z"></path>
+                    </svg>
+                    <h3>No meetings scheduled</h3>
+                    <p>Keep track of your online meetings and calls here.</p>
+                </div>
+                <?php endif; ?>
+            </div>
+        </div>
+    </div>
+
     <!-- Quick Status Change Menu -->
     <div class="quick-status-menu" id="quickStatusMenu">
         <div class="quick-status-option" onclick="quickChangeStatus('Not Started')">📝 Not Started</div>
@@ -1405,6 +1633,73 @@ $sort = isset($_GET['sort']) ? $_GET['sort'] : 'deadline';
                 <div class="form-actions">
                     <button type="button" class="btn btn-cancel" onclick="closeVisitModal()">Cancel</button>
                     <button type="submit" class="btn btn-submit">Save Visit</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <!-- Add/Edit Meeting Modal -->
+    <div class="modal" id="meetingModal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h2 id="meetingModalTitle">Add New Meeting</h2>
+                <button class="close-btn" onclick="closeMeetingModal()">&times;</button>
+            </div>
+            
+            <form method="POST" action="">
+                <input type="hidden" name="action" id="meetingFormAction" value="add_meeting">
+                <input type="hidden" name="meeting_id" id="meetingId">
+                
+                <div class="form-grid">
+                    <div class="form-group full-width">
+                        <label>Meeting Title</label>
+                        <input type="text" name="title" id="meeting_title" required placeholder="e.g. Weekly Standup">
+                    </div>
+
+                    <div class="form-group">
+                        <label>Date</label>
+                        <input type="date" name="meeting_date" id="meeting_date" required>
+                    </div>
+                    
+                    <div class="form-group">
+                        <label>Time</label>
+                        <div class="time-inputs">
+                            <input type="time" name="time_from" id="meeting_time_from" required>
+                            <span class="time-separator">to</span>
+                            <input type="time" name="time_to" id="meeting_time_to" required>
+                        </div>
+                    </div>
+                    
+                    <div class="form-group">
+                        <label>Platform</label>
+                        <select name="platform" id="meeting_platform" required>
+                            <option value="Zoom">Zoom</option>
+                            <option value="Google Meet">Google Meet</option>
+                            <option value="Microsoft Teams">Microsoft Teams</option>
+                            <option value="Skype">Skype</option>
+                            <option value="Phone Call">Phone Call</option>
+                            <option value="Other">Other</option>
+                        </select>
+                    </div>
+
+                    <div class="form-group">
+                        <label>Status</label>
+                        <select name="status" id="meeting_status">
+                            <option value="Scheduled">Scheduled</option>
+                            <option value="Completed">Completed</option>
+                            <option value="Cancelled">Cancelled</option>
+                        </select>
+                    </div>
+                    
+                    <div class="form-group full-width">
+                        <label>Link / Details</label>
+                        <input type="text" name="link" id="meeting_link" placeholder="Meeting URL or phone number">
+                    </div>
+                </div>
+                
+                <div class="form-actions">
+                    <button type="button" class="btn btn-cancel" onclick="closeMeetingModal()">Cancel</button>
+                    <button type="submit" class="btn btn-submit">Save Meeting</button>
                 </div>
             </form>
         </div>
@@ -1783,7 +2078,7 @@ $sort = isset($_GET['sort']) ? $_GET['sort'] : 'deadline';
         
         // Export Functions
         function toggleExportMenu(type) {
-            const menuId = type === 'task' ? 'taskExportMenu' : 'visitExportMenu';
+            const menuId = `${type}ExportMenu`;
             const menu = document.getElementById(menuId);
             
             // Close other menu
@@ -1838,12 +2133,22 @@ $sort = isset($_GET['sort']) ? $_GET['sort'] : 'deadline';
             const form = document.createElement('form');
             form.method = 'POST';
             form.action = 'export_tasks.php';
-            form.innerHTML = `
-                <input type="hidden" name="format" value="${format}">
-                <input type="hidden" name="filter" value="${tabName}">
-                <input type="hidden" name="search" value="${searchQuery}">
-                <input type="hidden" name="data" value='${JSON.stringify(visibleRows)}'>
-            `;
+            
+            const fields = {
+                format: format,
+                filter: tabName,
+                search: searchQuery,
+                data: JSON.stringify(visibleRows)
+            };
+            
+            for (const [key, value] of Object.entries(fields)) {
+                const input = document.createElement('input');
+                input.type = 'hidden';
+                input.name = key;
+                input.value = value;
+                form.appendChild(input);
+            }
+            
             document.body.appendChild(form);
             form.submit();
             document.body.removeChild(form);
@@ -1884,16 +2189,283 @@ $sort = isset($_GET['sort']) ? $_GET['sort'] : 'deadline';
             const form = document.createElement('form');
             form.method = 'POST';
             form.action = 'export_visits.php';
-            form.innerHTML = `
-                <input type="hidden" name="format" value="${format}">
-                <input type="hidden" name="search" value="${searchQuery}">
-                <input type="hidden" name="date_from" value="${dateFrom}">
-                <input type="hidden" name="date_to" value="${dateTo}">
-                <input type="hidden" name="data" value='${JSON.stringify(visibleVisits)}'>
-            `;
+            
+            const fields = {
+                format: format,
+                search: searchQuery,
+                date_from: dateFrom,
+                date_to: dateTo,
+                data: JSON.stringify(visibleVisits)
+            };
+            
+            for (const [key, value] of Object.entries(fields)) {
+                const input = document.createElement('input');
+                input.type = 'hidden';
+                input.name = key;
+                input.value = value;
+                form.appendChild(input);
+            }
+            
             document.body.appendChild(form);
             form.submit();
             document.body.removeChild(form);
+        }
+
+        // Meeting Functions
+        function openMeetingModal() {
+            document.getElementById('meetingModal').classList.add('active');
+            document.getElementById('meetingModalTitle').textContent = 'Add New Meeting';
+            document.getElementById('meetingFormAction').value = 'add_meeting';
+            document.querySelector('#meetingModal form').reset();
+            document.getElementById('meeting_date').valueAsDate = new Date();
+        }
+
+        function closeMeetingModal() {
+            document.getElementById('meetingModal').classList.remove('active');
+        }
+
+        function editMeeting(meeting) {
+            document.getElementById('meetingModal').classList.add('active');
+            document.getElementById('meetingModalTitle').textContent = 'Edit Meeting';
+            document.getElementById('meetingFormAction').value = 'edit_meeting';
+            document.getElementById('meetingId').value = meeting.id;
+            document.getElementById('meeting_title').value = meeting.title;
+            document.getElementById('meeting_date').value = meeting.meeting_date;
+            document.getElementById('meeting_time_from').value = meeting.time_from;
+            document.getElementById('meeting_time_to').value = meeting.time_to;
+            document.getElementById('meeting_platform').value = meeting.platform;
+            document.getElementById('meeting_link').value = meeting.link;
+            document.getElementById('meeting_status').value = meeting.status;
+        }
+
+        function deleteMeeting(id) {
+            if (confirm('Are you sure you want to delete this meeting?')) {
+                const form = document.createElement('form');
+                form.method = 'POST';
+                form.innerHTML = `
+                    <input type="hidden" name="action" value="delete_meeting">
+                    <input type="hidden" name="meeting_id" value="${id}">
+                `;
+                document.body.appendChild(form);
+                form.submit();
+            }
+        }
+
+        function searchMeetings() {
+            const input = document.getElementById('meetingSearchInput').value.toLowerCase();
+            const meetingCards = document.querySelectorAll('.meeting-card');
+            
+            meetingCards.forEach(card => {
+                const text = card.textContent.toLowerCase();
+                card.style.display = text.includes(input) ? '' : 'none';
+            });
+        }
+
+        function filterMeetingsByDate() {
+            const dateFrom = document.getElementById('meetingDateFrom').value;
+            const dateTo = document.getElementById('meetingDateTo').value;
+            
+            if (!dateFrom && !dateTo) {
+                showToast('Please select at least one date');
+                return;
+            }
+            
+            const meetingCards = document.querySelectorAll('.meeting-card');
+            let visibleCount = 0;
+            
+            meetingCards.forEach(card => {
+                const meetingDate = card.getAttribute('data-meeting-date');
+                let show = true;
+                
+                if (dateFrom && meetingDate < dateFrom) {
+                    show = false;
+                }
+                if (dateTo && meetingDate > dateTo) {
+                    show = false;
+                }
+                
+                card.style.display = show ? '' : 'none';
+                if (show) visibleCount++;
+            });
+            
+            showToast(`Showing ${visibleCount} meeting(s)`);
+        }
+
+        function clearMeetingFilter() {
+            document.getElementById('meetingDateFrom').value = '';
+            document.getElementById('meetingDateTo').value = '';
+            document.getElementById('meetingSearchInput').value = '';
+            
+            const meetingCards = document.querySelectorAll('.meeting-card');
+            meetingCards.forEach(card => {
+                card.style.display = '';
+            });
+            
+            showToast('Filter cleared');
+        }
+
+        function exportMeetings(format) {
+            const searchQuery = document.getElementById('meetingSearchInput').value;
+            const dateFrom = document.getElementById('meetingDateFrom').value;
+            const dateTo = document.getElementById('meetingDateTo').value;
+            
+            showToast(`Exporting meetings as ${format.toUpperCase()}...`);
+            
+            // Get visible meetings
+            const visibleMeetings = [];
+            const meetingCards = document.querySelectorAll('.meeting-card');
+            
+            meetingCards.forEach(card => {
+                if (card.style.display !== 'none') {
+                    const titleElem = card.querySelector('strong');
+                    const dateElem = card.querySelector('.visit-date');
+                    const timeElem = card.querySelector('.visit-time');
+                    const platformElem = card.querySelector('.meeting-platform');
+                    
+                    if (titleElem && dateElem && timeElem && platformElem) {
+                        const title = titleElem.textContent.trim();
+                        const date = dateElem.textContent.replace('📅 ', '').trim();
+                        const time = timeElem.textContent.replace('🕒 ', '').trim();
+                        const platform = platformElem.textContent.trim();
+                        const linkElem = card.querySelector('.meeting-link');
+                        const link = linkElem ? linkElem.getAttribute('href') : '';
+                        
+                        visibleMeetings.push({
+                            title: title,
+                            date: date,
+                            time: time,
+                            platform: platform,
+                            link: link
+                        });
+                    }
+                }
+            });
+            
+            if (visibleMeetings.length === 0) {
+                showToast('No meetings to export');
+                return;
+            }
+            
+            const form = document.createElement('form');
+            form.method = 'POST';
+            form.action = 'export_meetings.php';
+            
+            const fields = {
+                format: format,
+                search: searchQuery,
+                date_from: dateFrom,
+                date_to: dateTo,
+                data: JSON.stringify(visibleMeetings)
+            };
+            
+            for (const [key, value] of Object.entries(fields)) {
+                const input = document.createElement('input');
+                input.type = 'hidden';
+                input.name = key;
+                input.value = value;
+                form.appendChild(input);
+            }
+            
+            document.body.appendChild(form);
+            form.submit();
+            document.body.removeChild(form);
+        }
+
+        // Task Date Filter
+        function filterTasksByDate() {
+            const dateFrom = document.getElementById('taskDateFrom').value;
+            const dateTo = document.getElementById('taskDateTo').value;
+            const activeTab = document.querySelector('.tab-content.active');
+            const rows = activeTab.querySelectorAll('tbody tr');
+            let visibleCount = 0;
+
+            rows.forEach(row => {
+                // Assuming the second column (index 1) contains the date: "Oct 24, 2023"
+                const dateText = row.children[1].textContent.trim();
+                const taskDate = new Date(dateText).toISOString().split('T')[0];
+                let show = true;
+
+                if (dateFrom && taskDate < dateFrom) {
+                    show = false;
+                }
+                if (dateTo && taskDate > dateTo) {
+                    show = false;
+                }
+
+                row.style.display = show ? '' : 'none';
+                if (show) visibleCount++;
+            });
+            showToast(visibleCount + ' tasks visible');
+        }
+        
+        // Revised Bulk Functions
+        function bulkDelete() {
+            const selected = Array.from(document.querySelectorAll('.task-checkbox:checked'))
+                .map(cb => cb.value);
+            
+            if (selected.length === 0) return;
+            
+            if (confirm(`Delete ${selected.length} task(s)?`)) {
+                const form = document.createElement('form');
+                form.method = 'POST';
+                const inputId = document.createElement('input');
+                inputId.type = 'hidden';
+                inputId.name = 'task_ids';
+                inputId.value = JSON.stringify(selected);
+                
+                const inputAction = document.createElement('input');
+                inputAction.type = 'hidden';
+                inputAction.name = 'action';
+                inputAction.value = 'bulk_delete';
+                
+                form.appendChild(inputId);
+                form.appendChild(inputAction);
+                document.body.appendChild(form);
+                form.submit();
+            }
+        }
+        
+        function bulkUpdateStatus() {
+            const selected = Array.from(document.querySelectorAll('.task-checkbox:checked'))
+                .map(cb => cb.value);
+            
+            if (selected.length === 0) return;
+            
+            const newStatus = prompt('Enter new status:\n1. Not Started\n2. In Progress\n3. Completed\n4. On Hold');
+            const statusMap = {
+                '1': 'Not Started',
+                '2': 'In Progress',
+                '3': 'Completed',
+                '4': 'On Hold'
+            };
+            
+            const status = statusMap[newStatus];
+            
+            if (status) {
+                const form = document.createElement('form');
+                form.method = 'POST';
+                
+                const inputId = document.createElement('input');
+                inputId.type = 'hidden';
+                inputId.name = 'task_ids';
+                inputId.value = JSON.stringify(selected);
+                
+                const inputAction = document.createElement('input');
+                inputAction.type = 'hidden';
+                inputAction.name = 'action';
+                inputAction.value = 'bulk_status';
+                
+                const inputStatus = document.createElement('input');
+                inputStatus.type = 'hidden';
+                inputStatus.name = 'status';
+                inputStatus.value = status;
+                
+                form.appendChild(inputId);
+                form.appendChild(inputAction);
+                form.appendChild(inputStatus);
+                document.body.appendChild(form);
+                form.submit();
+            }
         }
     </script>
 </body>

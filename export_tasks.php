@@ -95,7 +95,7 @@ if ($format === 'pdf') {
             $this->SetFont('Arial', 'B', 9);
             
             // Header
-            $w = array(25, 30, 60, 20, 25, 25, 20);
+            $w = array(30, 35, 75, 20, 25, 25, 15); // Adjusted widths
             for($i = 0; $i < count($header); $i++) {
                 $this->Cell($w[$i], 7, $header[$i], 1, 0, 'C', true);
             }
@@ -108,35 +108,119 @@ if ($format === 'pdf') {
             
             $fill = false;
             foreach($data as $row) {
-                $this->Cell($w[0], 6, $row['date'], 'LR', 0, 'L', $fill);
-                $this->Cell($w[1], 6, $row['project'], 'LR', 0, 'L', $fill);
+                // Sanitize and Encode Data
+                $date = iconv('UTF-8', 'ISO-8859-1//TRANSLIT', $row['date']);
+                $project = iconv('UTF-8', 'ISO-8859-1//TRANSLIT', $row['project']);
+                $task = iconv('UTF-8', 'ISO-8859-1//TRANSLIT', $row['task']);
+                $priority = iconv('UTF-8', 'ISO-8859-1//TRANSLIT', $row['priority']);
+                $deadline = iconv('UTF-8', 'ISO-8859-1//TRANSLIT', $row['deadline']);
+                $status = iconv('UTF-8', 'ISO-8859-1//TRANSLIT', $row['status']);
+                $completion = str_replace('%', '', $row['completion']) . '%'; // Ensure single %
+
+                // Calculate max height for this row based on all wrapping columns
+                $nb1 = $this->NbLines($w[1], $project);
+                $nb2 = $this->NbLines($w[2], $task);
+                $nb = max($nb1, $nb2);
+                $h = 6 * $nb;
                 
-                // Truncate long task descriptions
-                $task = strlen($row['task']) > 35 ? substr($row['task'], 0, 35) . '...' : $row['task'];
-                $this->Cell($w[2], 6, $task, 'LR', 0, 'L', $fill);
+                // Check page break
+                if($this->GetY() + $h > $this->PageBreakTrigger) {
+                    $this->AddPage($this->CurOrientation);
+                    
+                    // Re-print header
+                    $this->SetFillColor(30, 60, 114);
+                    $this->SetTextColor(255);
+                    $this->SetFont('Arial', 'B', 9);
+                    for($i = 0; $i < count($header); $i++) {
+                        $this->Cell($w[$i], 7, $header[$i], 1, 0, 'C', true);
+                    }
+                    $this->Ln();
+                    
+                    $this->SetFillColor(248, 249, 250);
+                    $this->SetTextColor(0);
+                    $this->SetFont('Arial', '', 8);
+                }
                 
-                // Priority color coding
-                $priority = $row['priority'];
-                $color = $this->getPriorityColor($priority);
+                // Draw cells
+                $x = $this->GetX();
+                $y = $this->GetY();
+                
+                $this->Rect($x, $y, $w[0], $h, $fill ? 'F' : '');
+                $this->MultiCell($w[0], 6, $date, 0, 'L');
+                $this->SetXY($x + $w[0], $y);
+                
+                $this->Rect($x + $w[0], $y, $w[1], $h, $fill ? 'F' : '');
+                $this->MultiCell($w[1], 6, $project, 0, 'L');
+                $this->SetXY($x + $w[0] + $w[1], $y);
+                
+                $this->Rect($x + $w[0] + $w[1], $y, $w[2], $h, $fill ? 'F' : '');
+                $this->MultiCell($w[2], 6, $task, 0, 'L');
+                $this->SetXY($x + $w[0] + $w[1] + $w[2], $y);
+                
+                // Priority color
+                $color = $this->getPriorityColor($row['priority']); // Use original key for logic
                 $this->SetTextColor($color[0], $color[1], $color[2]);
-                $this->Cell($w[3], 6, $priority, 'LR', 0, 'C', $fill);
+                $this->Rect($x + array_sum(array_slice($w, 0, 3)), $y, $w[3], $h, $fill ? 'F' : '');
+                $this->MultiCell($w[3], 6, $priority, 0, 'C');
                 $this->SetTextColor(0);
+                $this->SetXY($x + array_sum(array_slice($w, 0, 4)), $y);
                 
-                $this->Cell($w[4], 6, $row['deadline'], 'LR', 0, 'L', $fill);
+                $this->Rect($x + array_sum(array_slice($w, 0, 4)), $y, $w[4], $h, $fill ? 'F' : '');
+                $this->MultiCell($w[4], 6, $deadline, 0, 'L');
+                $this->SetXY($x + array_sum(array_slice($w, 0, 5)), $y);
                 
-                // Status color coding
-                $status = $row['status'];
-                $color = $this->getStatusColor($status);
+                // Status color
+                $color = $this->getStatusColor($row['status']); // Use original key for logic
                 $this->SetTextColor($color[0], $color[1], $color[2]);
-                $this->Cell($w[5], 6, $status, 'LR', 0, 'C', $fill);
+                $this->Rect($x + array_sum(array_slice($w, 0, 5)), $y, $w[5], $h, $fill ? 'F' : '');
+                $this->MultiCell($w[5], 6, $status, 0, 'C');
                 $this->SetTextColor(0);
+                $this->SetXY($x + array_sum(array_slice($w, 0, 6)), $y);
                 
-                $this->Cell($w[6], 6, $row['completion'], 'LR', 0, 'C', $fill);
+                $this->Rect($x + array_sum(array_slice($w, 0, 6)), $y, $w[6], $h, $fill ? 'F' : '');
+                $this->MultiCell($w[6], 6, $completion, 0, 'C');
                 
-                $this->Ln();
+                $this->Ln($h);
                 $fill = !$fill;
             }
             $this->Cell(array_sum($w), 0, '', 'T');
+        }
+
+        function NbLines($w, $txt) {
+            $cw = &$this->CurrentFont['cw'];
+            if($w == 0) $w = $this->w - $this->rMargin - $this->x;
+            $wmax = ($w - 2 * $this->cMargin) * 1000 / $this->FontSize;
+            $s = str_replace("\r", '', $txt);
+            $nb = strlen($s);
+            if($nb > 0 && $s[$nb - 1] == "\n") $nb--;
+            $sep = -1;
+            $i = 0;
+            $j = 0;
+            $l = 0;
+            $nl = 1;
+            while($i < $nb) {
+                $c = $s[$i];
+                if($c == "\n") {
+                    $i++;
+                    $sep = -1;
+                    $j = $i;
+                    $l = 0;
+                    $nl++;
+                    continue;
+                }
+                if($c == ' ') $sep = $i;
+                $l += $cw[$c];
+                if($l > $wmax) {
+                    if($sep == -1) {
+                        if($i == $j) $i++;
+                    } else $i = $sep + 1;
+                    $sep = -1;
+                    $j = $i;
+                    $l = 0;
+                    $nl++;
+                } else $i++;
+            }
+            return $nl;
         }
         
         function getPriorityColor($priority) {
