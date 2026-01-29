@@ -22,6 +22,32 @@ if ($table_check->num_rows == 0) {
     }
 }
 
+// Check and create job_applications table if it doesn't exist
+$table_check = $conn->query("SHOW TABLES LIKE 'job_applications'");
+if ($table_check->num_rows == 0) {
+    $sql = "CREATE TABLE job_applications (
+        id INT(11) UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+        user_id INT(11) NOT NULL,
+        job_title VARCHAR(200) NOT NULL,
+        company VARCHAR(200) NOT NULL,
+        date_applied DATE NOT NULL,
+        job_description TEXT NOT NULL,
+        work_mode ENUM('Onsite', 'Hybrid', 'Remote') NOT NULL,
+        image_path VARCHAR(500) DEFAULT NULL,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+    )";
+    if ($conn->query($sql) !== TRUE) {
+        die("Error creating table: " . $conn->error);
+    }
+}
+
+// Create uploads directory if it doesn't exist
+$upload_dir = 'uploads/job_applications';
+if (!file_exists($upload_dir)) {
+    mkdir($upload_dir, 0777, true);
+}
+
 // Handle task operations
 if ($_SERVER['REQUEST_METHOD'] == 'POST') {
     if (isset($_POST['action'])) {
@@ -167,6 +193,101 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST') {
             $stmt->bind_param("ii", $_POST['meeting_id'], $user_id);
             $stmt->execute();
             $stmt->close();
+        } elseif ($_POST['action'] == 'add_job_application') {
+            $image_path = null;
+            
+            // Handle image upload
+            if (isset($_FILES['job_image']) && $_FILES['job_image']['error'] == 0) {
+                $allowed_types = ['image/jpeg', 'image/jpg', 'image/png', 'image/gif', 'image/webp'];
+                $max_size = 5 * 1024 * 1024; // 5MB
+                
+                if (in_array($_FILES['job_image']['type'], $allowed_types) && $_FILES['job_image']['size'] <= $max_size) {
+                    $file_extension = pathinfo($_FILES['job_image']['name'], PATHINFO_EXTENSION);
+                    $file_name = $user_id . '_' . time() . '_' . uniqid() . '.' . $file_extension;
+                    $upload_path = 'uploads/job_applications/' . $file_name;
+                    
+                    if (move_uploaded_file($_FILES['job_image']['tmp_name'], $upload_path)) {
+                        $image_path = $upload_path;
+                    }
+                }
+            }
+            
+            $stmt = $conn->prepare("INSERT INTO job_applications (user_id, job_title, company, date_applied, job_description, work_mode, image_path) VALUES (?, ?, ?, ?, ?, ?, ?)");
+            $stmt->bind_param("issssss", 
+                $user_id,
+                $_POST['job_title'],
+                $_POST['company'],
+                $_POST['date_applied'],
+                $_POST['job_description'],
+                $_POST['work_mode'],
+                $image_path
+            );
+            $stmt->execute();
+            $stmt->close();
+        } elseif ($_POST['action'] == 'edit_job_application') {
+            // Get current image path
+            $stmt = $conn->prepare("SELECT image_path FROM job_applications WHERE id=? AND user_id=?");
+            $stmt->bind_param("ii", $_POST['job_app_id'], $user_id);
+            $stmt->execute();
+            $result = $stmt->get_result();
+            $current_app = $result->fetch_assoc();
+            $stmt->close();
+            
+            $image_path = $current_app['image_path'];
+            
+            // Handle new image upload
+            if (isset($_FILES['job_image']) && $_FILES['job_image']['error'] == 0) {
+                $allowed_types = ['image/jpeg', 'image/jpg', 'image/png', 'image/gif', 'image/webp'];
+                $max_size = 5 * 1024 * 1024; // 5MB
+                
+                if (in_array($_FILES['job_image']['type'], $allowed_types) && $_FILES['job_image']['size'] <= $max_size) {
+                    // Delete old image if exists
+                    if ($image_path && file_exists($image_path)) {
+                        unlink($image_path);
+                    }
+                    
+                    $file_extension = pathinfo($_FILES['job_image']['name'], PATHINFO_EXTENSION);
+                    $file_name = $user_id . '_' . time() . '_' . uniqid() . '.' . $file_extension;
+                    $upload_path = 'uploads/job_applications/' . $file_name;
+                    
+                    if (move_uploaded_file($_FILES['job_image']['tmp_name'], $upload_path)) {
+                        $image_path = $upload_path;
+                    }
+                }
+            }
+            
+            $stmt = $conn->prepare("UPDATE job_applications SET job_title=?, company=?, date_applied=?, job_description=?, work_mode=?, image_path=? WHERE id=? AND user_id=?");
+            $stmt->bind_param("ssssssii",
+                $_POST['job_title'],
+                $_POST['company'],
+                $_POST['date_applied'],
+                $_POST['job_description'],
+                $_POST['work_mode'],
+                $image_path,
+                $_POST['job_app_id'],
+                $user_id
+            );
+            $stmt->execute();
+            $stmt->close();
+        } elseif ($_POST['action'] == 'delete_job_application') {
+            // Get image path before deleting
+            $stmt = $conn->prepare("SELECT image_path FROM job_applications WHERE id=? AND user_id=?");
+            $stmt->bind_param("ii", $_POST['job_app_id'], $user_id);
+            $stmt->execute();
+            $result = $stmt->get_result();
+            $app = $result->fetch_assoc();
+            $stmt->close();
+            
+            // Delete image file if exists
+            if ($app && $app['image_path'] && file_exists($app['image_path'])) {
+                unlink($app['image_path']);
+            }
+            
+            // Delete database record
+            $stmt = $conn->prepare("DELETE FROM job_applications WHERE id=? AND user_id=?");
+            $stmt->bind_param("ii", $_POST['job_app_id'], $user_id);
+            $stmt->execute();
+            $stmt->close();
         }
         header("Location: index.php");
         exit();
@@ -183,6 +304,9 @@ $visits_result = $conn->query("SELECT * FROM visits WHERE user_id=$user_id ORDER
 
 // Fetch all meetings
 $meetings_result = $conn->query("SELECT * FROM meetings WHERE user_id=$user_id ORDER BY meeting_date ASC, time_from ASC");
+
+// Fetch all job applications
+$job_apps_result = $conn->query("SELECT * FROM job_applications WHERE user_id=$user_id ORDER BY date_applied DESC");
 
 // Get filter and sort from URL
 $filter = isset($_GET['filter']) ? $_GET['filter'] : 'all';
@@ -985,6 +1109,135 @@ $sort = isset($_GET['sort']) ? $_GET['sort'] : 'deadline';
         .export-icon {
             font-size: 18px;
         }
+        
+        /* Job Applications Styles */
+        .job-app-card {
+            background: white;
+            border-left: 4px solid #9c27b0;
+            padding: 20px;
+            border-radius: 12px;
+            margin-bottom: 15px;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.05);
+            transition: all 0.3s;
+            display: grid;
+            grid-template-columns: auto 1fr auto;
+            gap: 20px;
+            align-items: start;
+        }
+        .job-app-card:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 4px 12px rgba(0,0,0,0.1);
+        }
+        .job-image-preview {
+            width: 120px;
+            height: 120px;
+            object-fit: cover;
+            border-radius: 8px;
+            border: 2px solid #e0e0e0;
+        }
+        .job-app-content {
+            flex: 1;
+        }
+        .job-app-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: start;
+            margin-bottom: 10px;
+        }
+        .job-title {
+            font-size: 18px;
+            font-weight: 600;
+            color: #333;
+            margin-bottom: 5px;
+        }
+        .job-company {
+            font-size: 14px;
+            color: #666;
+            margin-bottom: 8px;
+        }
+        .job-date {
+            font-size: 13px;
+            color: #999;
+            display: flex;
+            align-items: center;
+            gap: 5px;
+        }
+        .work-mode-badge {
+            display: inline-block;
+            padding: 4px 12px;
+            border-radius: 12px;
+            font-size: 12px;
+            font-weight: 600;
+            margin-top: 8px;
+        }
+        .work-mode-onsite {
+            background: #e3f2fd;
+            color: #1976d2;
+        }
+        .work-mode-hybrid {
+            background: #fff3e0;
+            color: #f57c00;
+        }
+        .work-mode-remote {
+            background: #e8f5e9;
+            color: #388e3c;
+        }
+        .job-description {
+            font-size: 14px;
+            color: #666;
+            line-height: 1.6;
+            margin-top: 10px;
+            display: -webkit-box;
+            -webkit-line-clamp: 3;
+            -webkit-box-orient: vertical;
+            overflow: hidden;
+        }
+        .image-upload-preview {
+            margin-top: 15px;
+            text-align: center;
+        }
+        .image-upload-preview img {
+            max-width: 100%;
+            max-height: 300px;
+            border-radius: 8px;
+            border: 2px solid #e0e0e0;
+        }
+        .file-input-wrapper {
+            position: relative;
+            display: inline-block;
+            cursor: pointer;
+        }
+        .file-input-wrapper input[type="file"] {
+            position: absolute;
+            opacity: 0;
+            width: 100%;
+            height: 100%;
+            cursor: pointer;
+        }
+        .file-input-label {
+            display: inline-block;
+            padding: 10px 20px;
+            background: #f5f5f5;
+            border: 2px dashed #ccc;
+            border-radius: 8px;
+            cursor: pointer;
+            transition: all 0.3s;
+        }
+        .file-input-label:hover {
+            background: #e8e8e8;
+            border-color: #1e3c72;
+        }
+        .no-image-placeholder {
+            width: 120px;
+            height: 120px;
+            background: #f5f5f5;
+            border-radius: 8px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 48px;
+            color: #ccc;
+        }
     </style>
 </head>
 <body>
@@ -1012,6 +1265,7 @@ $sort = isset($_GET['sort']) ? $_GET['sort'] : 'deadline';
             <button class="nav-item active" onclick="showSection('tasks', event)">Tasks</button>
             <button class="nav-item" onclick="showSection('visits', event)">Visits</button>
             <button class="nav-item" onclick="showSection('meetings', event)">Meetings</button>
+            <button class="nav-item" onclick="showSection('job-applications', event)">Job Applications</button>
         </div>
     </div>
 
@@ -1507,6 +1761,111 @@ $sort = isset($_GET['sort']) ? $_GET['sort'] : 'deadline';
         </div>
     </div>
 
+    <!-- Job Applications Section -->
+    <div id="job-applications-section" class="section-container hidden">
+        <?php
+        $total_job_apps = $job_apps_result->num_rows;
+        $this_month_apps = $conn->query("SELECT COUNT(*) as count FROM job_applications WHERE user_id=$user_id AND MONTH(date_applied) = MONTH(CURDATE()) AND YEAR(date_applied) = YEAR(CURDATE())")->fetch_assoc()['count'];
+        $this_week_apps = $conn->query("SELECT COUNT(*) as count FROM job_applications WHERE user_id=$user_id AND YEARWEEK(date_applied) = YEARWEEK(CURDATE())")->fetch_assoc()['count'];
+        ?>
+        
+        <div class="stats">
+            <div class="stat-card">
+                <h3>Total Applications</h3>
+                <div class="number"><?php echo $total_job_apps; ?></div>
+                <div class="trend">💼 All applications</div>
+            </div>
+            <div class="stat-card">
+                <h3>This Month</h3>
+                <div class="number"><?php echo $this_month_apps; ?></div>
+                <div class="trend">📅 Current month</div>
+            </div>
+            <div class="stat-card">
+                <h3>This Week</h3>
+                <div class="number"><?php echo $this_week_apps; ?></div>
+                <div class="trend">📊 Last 7 days</div>
+            </div>
+        </div>
+
+        <div class="section">
+            <div class="section-header">
+                <h2>Job Applications</h2>
+                <div class="header-controls">
+                    <div class="search-box">
+                        <input type="text" id="jobAppSearchInput" placeholder="Search applications..." onkeyup="searchJobApps()">
+                    </div>
+                    <div class="date-filter">
+                        <input type="date" id="jobAppDateFrom" onchange="filterJobAppsByDate()">
+                        <span>to</span>
+                        <input type="date" id="jobAppDateTo" onchange="filterJobAppsByDate()">
+                    </div>
+                    <select class="sort-dropdown" id="workModeFilter" onchange="filterByWorkMode()">
+                        <option value="all">All Work Modes</option>
+                        <option value="Onsite">Onsite</option>
+                        <option value="Hybrid">Hybrid</option>
+                        <option value="Remote">Remote</option>
+                    </select>
+                    <button class="btn btn-add" onclick="openJobAppModal()">+ Add New Application</button>
+                    <div class="export-dropdown">
+                        <button class="btn btn-export" onclick="toggleExportMenu('jobApp')">
+                            📥 Export
+                        </button>
+                        <div class="export-menu" id="jobAppExportMenu">
+                            <div class="export-option" onclick="exportJobApps('pdf')">
+                                <span class="export-icon">📄</span>
+                                <span>Export as PDF</span>
+                            </div>
+                            <div class="export-option" onclick="exportJobApps('excel')">
+                                <span class="export-icon">📊</span>
+                                <span>Export as Excel</span>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <div id="jobAppsList">
+                <?php if ($job_apps_result->num_rows > 0): ?>
+                    <?php while($app = $job_apps_result->fetch_assoc()): ?>
+                        <div class="job-app-card" data-work-mode="<?php echo $app['work_mode']; ?>" data-date="<?php echo $app['date_applied']; ?>">
+                            <?php if ($app['image_path'] && file_exists($app['image_path'])): ?>
+                                <img src="<?php echo $app['image_path']; ?>" alt="Job Description" class="job-image-preview">
+                            <?php else: ?>
+                                <div class="no-image-placeholder">📄</div>
+                            <?php endif; ?>
+                            
+                            <div class="job-app-content">
+                                <div class="job-title"><?php echo htmlspecialchars($app['job_title']); ?></div>
+                                <div class="job-company">🏢 <?php echo htmlspecialchars($app['company']); ?></div>
+                                <div class="job-date">📅 Applied on <?php echo date('M d, Y', strtotime($app['date_applied'])); ?></div>
+                                <span class="work-mode-badge work-mode-<?php echo strtolower($app['work_mode']); ?>">
+                                    <?php 
+                                    $icons = ['Onsite' => '🏢', 'Hybrid' => '🔄', 'Remote' => '🌐'];
+                                    echo $icons[$app['work_mode']] . ' ' . $app['work_mode']; 
+                                    ?>
+                                </span>
+                                <div class="job-description"><?php echo nl2br(htmlspecialchars($app['job_description'])); ?></div>
+                            </div>
+                            
+                            <div class="actions">
+                                <button class="btn-small btn-edit" onclick='editJobApp(<?php echo json_encode($app); ?>)'>Edit</button>
+                                <button class="btn-small btn-delete" onclick="deleteJobApp(<?php echo $app['id']; ?>)">Delete</button>
+                            </div>
+                        </div>
+                    <?php endwhile; ?>
+                <?php else: ?>
+                    <div class="empty-state">
+                        <svg fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 13.255A23.931 23.931 0 0112 15c-3.183 0-6.22-.62-9-1.745M16 6V4a2 2 0 00-2-2h-4a2 2 0 00-2 2v2m4 6h.01M5 20h14a2 2 0 002-2V8a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z"></path>
+                        </svg>
+                        <h3>No job applications yet</h3>
+                        <p>Start tracking your job applications here.</p>
+                    </div>
+                <?php endif; ?>
+            </div>
+        </div>
+    </div>
+
     <!-- Quick Status Change Menu -->
     <div class="quick-status-menu" id="quickStatusMenu">
         <div class="quick-status-option" onclick="quickChangeStatus('Not Started')">📝 Not Started</div>
@@ -1700,6 +2059,74 @@ $sort = isset($_GET['sort']) ? $_GET['sort'] : 'deadline';
                 <div class="form-actions">
                     <button type="button" class="btn btn-cancel" onclick="closeMeetingModal()">Cancel</button>
                     <button type="submit" class="btn btn-submit">Save Meeting</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <!-- Add/Edit Job Application Modal -->
+    <div class="modal" id="jobAppModal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h2 id="jobAppModalTitle">Add New Job Application</h2>
+                <button class="close-btn" onclick="closeJobAppModal()">&times;</button>
+            </div>
+            
+            <form method="POST" action="" enctype="multipart/form-data" id="jobAppForm">
+                <input type="hidden" name="action" id="jobAppFormAction" value="add_job_application">
+                <input type="hidden" name="job_app_id" id="jobAppId">
+                
+                <div class="form-grid">
+                    <div class="form-group">
+                        <label>Job Title *</label>
+                        <input type="text" name="job_title" id="job_title" required placeholder="e.g., Senior Software Engineer">
+                    </div>
+                    
+                    <div class="form-group">
+                        <label>Company *</label>
+                        <input type="text" name="company" id="company" required placeholder="e.g., Tech Corp">
+                    </div>
+                    
+                    <div class="form-group">
+                        <label>Date Applied *</label>
+                        <input type="date" name="date_applied" id="date_applied" required>
+                    </div>
+                    
+                    <div class="form-group">
+                        <label>Work Mode *</label>
+                        <select name="work_mode" id="work_mode" required>
+                            <option value="Onsite">Onsite</option>
+                            <option value="Hybrid">Hybrid</option>
+                            <option value="Remote">Remote</option>
+                        </select>
+                    </div>
+                    
+                    <div class="form-group full-width">
+                        <label>Job Description *</label>
+                        <textarea name="job_description" id="job_description" required placeholder="Describe the job role, responsibilities, requirements..." rows="5"></textarea>
+                    </div>
+                    
+                    <div class="form-group full-width">
+                        <label>Job Description Image (Optional)</label>
+                        <div class="file-input-wrapper">
+                            <input type="file" name="job_image" id="job_image" accept="image/*" onchange="previewJobImage(event)">
+                            <div class="file-input-label">
+                                📎 Click to upload image (Max 5MB)
+                            </div>
+                        </div>
+                        <small style="color: #666; display: block; margin-top: 5px;">Supported formats: JPG, PNG, GIF, WebP</small>
+                    </div>
+                    
+                    <div class="form-group full-width">
+                        <div class="image-upload-preview" id="imagePreview" style="display: none;">
+                            <img id="previewImg" src="" alt="Preview">
+                        </div>
+                    </div>
+                </div>
+                
+                <div class="form-actions">
+                    <button type="button" class="btn btn-cancel" onclick="closeJobAppModal()">Cancel</button>
+                    <button type="submit" class="btn btn-submit">Save Application</button>
                 </div>
             </form>
         </div>
@@ -2466,6 +2893,199 @@ $sort = isset($_GET['sort']) ? $_GET['sort'] : 'deadline';
                 document.body.appendChild(form);
                 form.submit();
             }
+        }
+
+        // Job Applications Functions
+        function openJobAppModal() {
+            document.getElementById('jobAppModal').classList.add('active');
+            document.getElementById('jobAppModalTitle').textContent = 'Add New Job Application';
+            document.getElementById('jobAppFormAction').value = 'add_job_application';
+            document.querySelector('#jobAppForm').reset();
+            document.getElementById('date_applied').valueAsDate = new Date();
+            document.getElementById('imagePreview').style.display = 'none';
+        }
+
+        function closeJobAppModal() {
+            document.getElementById('jobAppModal').classList.remove('active');
+        }
+
+        function editJobApp(app) {
+            document.getElementById('jobAppModal').classList.add('active');
+            document.getElementById('jobAppModalTitle').textContent = 'Edit Job Application';
+            document.getElementById('jobAppFormAction').value = 'edit_job_application';
+            document.getElementById('jobAppId').value = app.id;
+            document.getElementById('job_title').value = app.job_title;
+            document.getElementById('company').value = app.company;
+            document.getElementById('date_applied').value = app.date_applied;
+            document.getElementById('job_description').value = app.job_description;
+            document.getElementById('work_mode').value = app.work_mode;
+            
+            if (app.image_path) {
+                document.getElementById('imagePreview').style.display = 'block';
+                document.getElementById('previewImg').src = app.image_path;
+            } else {
+                document.getElementById('imagePreview').style.display = 'none';
+            }
+        }
+
+        function deleteJobApp(id) {
+            if (confirm('Are you sure you want to delete this job application?')) {
+                const form = document.createElement('form');
+                form.method = 'POST';
+                form.innerHTML = `
+                    <input type="hidden" name="action" value="delete_job_application">
+                    <input type="hidden" name="job_app_id" value="${id}">
+                `;
+                document.body.appendChild(form);
+                form.submit();
+            }
+        }
+
+        function previewJobImage(event) {
+            const file = event.target.files[0];
+            if (file) {
+                if (file.size > 5 * 1024 * 1024) {
+                    alert('File size must be less than 5MB');
+                    event.target.value = '';
+                    return;
+                }
+                
+                const allowedTypes = ['image/jpeg', 'image/jpg', 'image/png', 'image/gif', 'image/webp'];
+                if (!allowedTypes.includes(file.type)) {
+                    alert('Please upload a valid image file (JPG, PNG, GIF, or WebP)');
+                    event.target.value = '';
+                    return;
+                }
+                
+                const reader = new FileReader();
+                reader.onload = function(e) {
+                    document.getElementById('imagePreview').style.display = 'block';
+                    document.getElementById('previewImg').src = e.target.result;
+                };
+                reader.readAsDataURL(file);
+            }
+        }
+
+        function searchJobApps() {
+            const input = document.getElementById('jobAppSearchInput').value.toLowerCase();
+            const jobAppCards = document.querySelectorAll('.job-app-card');
+            
+            jobAppCards.forEach(card => {
+                const text = card.textContent.toLowerCase();
+                card.style.display = text.includes(input) ? '' : 'none';
+            });
+        }
+
+        function filterByWorkMode() {
+            const workMode = document.getElementById('workModeFilter').value;
+            const jobAppCards = document.querySelectorAll('.job-app-card');
+            let visibleCount = 0;
+            
+            jobAppCards.forEach(card => {
+                if (workMode === 'all' || card.getAttribute('data-work-mode') === workMode) {
+                    card.style.display = '';
+                    visibleCount++;
+                } else {
+                    card.style.display = 'none';
+                }
+            });
+            
+            if (workMode !== 'all') {
+                showToast(`Showing ${visibleCount} ${workMode} application(s)`);
+            }
+        }
+
+        function filterJobAppsByDate() {
+            const dateFrom = document.getElementById('jobAppDateFrom').value;
+            const dateTo = document.getElementById('jobAppDateTo').value;
+            
+            if (!dateFrom && !dateTo) {
+                showToast('Please select at least one date');
+                return;
+            }
+            
+            const jobAppCards = document.querySelectorAll('.job-app-card');
+            let visibleCount = 0;
+            
+            jobAppCards.forEach(card => {
+                const appDate = card.getAttribute('data-date');
+                let show = true;
+                
+                if (dateFrom && appDate < dateFrom) {
+                    show = false;
+                }
+                if (dateTo && appDate > dateTo) {
+                    show = false;
+                }
+                
+                card.style.display = show ? '' : 'none';
+                if (show) visibleCount++;
+            });
+            
+            showToast(`Showing ${visibleCount} application(s)`);
+        }
+
+        function exportJobApps(format) {
+            const searchQuery = document.getElementById('jobAppSearchInput').value;
+            const dateFrom = document.getElementById('jobAppDateFrom').value;
+            const dateTo = document.getElementById('jobAppDateTo').value;
+            const workMode = document.getElementById('workModeFilter').value;
+            
+            showToast(`Exporting job applications as ${format.toUpperCase()}...`);
+            
+            // Get visible job applications
+            const visibleApps = [];
+            const jobAppCards = document.querySelectorAll('.job-app-card');
+            
+            jobAppCards.forEach(card => {
+                if (card.style.display !== 'none') {
+                    const jobTitle = card.querySelector('.job-title').textContent.trim();
+                    const company = card.querySelector('.job-company').textContent.replace('🏢 ', '').trim();
+                    const dateText = card.querySelector('.job-date').textContent.replace('📅 Applied on ', '').trim();
+                    const workModeText = card.querySelector('.work-mode-badge').textContent.trim().split(' ').slice(1).join(' '); // Remove emoji
+                    const description = card.querySelector('.job-description').textContent.trim();
+                    const hasImage = card.querySelector('.job-image-preview') !== null;
+                    
+                    visibleApps.push({
+                        job_title: jobTitle,
+                        company: company,
+                        date_applied: dateText,
+                        work_mode: workModeText,
+                        job_description: description,
+                        has_image: hasImage
+                    });
+                }
+            });
+            
+            if (visibleApps.length === 0) {
+                showToast('No job applications to export');
+                return;
+            }
+            
+            const form = document.createElement('form');
+            form.method = 'POST';
+            form.action = 'export_job_applications.php';
+            
+            const fields = {
+                format: format,
+                search: searchQuery,
+                date_from: dateFrom,
+                date_to: dateTo,
+                work_mode: workMode !== 'all' ? workMode : '',
+                data: JSON.stringify(visibleApps)
+            };
+            
+            for (const [key, value] of Object.entries(fields)) {
+                const input = document.createElement('input');
+                input.type = 'hidden';
+                input.name = key;
+                input.value = value;
+                form.appendChild(input);
+            }
+            
+            document.body.appendChild(form);
+            form.submit();
+            document.body.removeChild(form);
         }
     </script>
 </body>
