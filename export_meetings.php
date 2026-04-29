@@ -91,67 +91,91 @@ if ($format === 'pdf') {
             // Colors
             $this->SetFillColor(30, 60, 114);
             $this->SetTextColor(255);
-            $this->SetDrawColor(200, 200, 200);
+            $this->SetDrawColor(128, 128, 128);
             $this->SetLineWidth(.3);
             $this->SetFont('Arial', 'B', 10);
             
-            // Header
+            // Column widths: Meeting Title, Date, Time, Platform, Link/Details
             $w = array(65, 35, 45, 35, 95);
+            
+            // Header row
             for($i = 0; $i < count($header); $i++) {
                 $this->Cell($w[$i], 7, $header[$i], 1, 0, 'C', true);
             }
             $this->Ln();
             
-            // Data
-            $this->SetFillColor(248, 249, 250);
+            // Data rows
             $this->SetTextColor(0);
             $this->SetFont('Arial', '', 9);
-            
             $fill = false;
+            
             foreach($data as $row) {
-                // Sanitize and Encode Data
-                $title = iconv('UTF-8', 'ISO-8859-1//TRANSLIT', $row['title']);
-                $mdate = iconv('UTF-8', 'ISO-8859-1//TRANSLIT', $row['date']);
-                $time = iconv('UTF-8', 'ISO-8859-1//TRANSLIT', $row['time']);
-                $platform = iconv('UTF-8', 'ISO-8859-1//TRANSLIT', $row['platform']);
-                $link = iconv('UTF-8', 'ISO-8859-1//TRANSLIT', $row['link']);
+                // Sanitize and encode
+                $title    = iconv('UTF-8', 'ISO-8859-1//TRANSLIT//IGNORE', $row['title']);
+                $mdate    = iconv('UTF-8', 'ISO-8859-1//TRANSLIT//IGNORE', $row['date']);
+                $time     = iconv('UTF-8', 'ISO-8859-1//TRANSLIT//IGNORE', $row['time']);
+                $platform = iconv('UTF-8', 'ISO-8859-1//TRANSLIT//IGNORE', $row['platform']);
+                $link     = iconv('UTF-8', 'ISO-8859-1//TRANSLIT//IGNORE', $row['link']);
 
-                // Calculate max height for this row
-                $nb1 = $this->NbLines($w[0], $title);
-                $nb2 = $this->NbLines($w[4], $link);
-                $nb = max($nb1, $nb2);
-                $h = 6 * max($nb, 1);
+                // Calculate row height based on tallest wrapping column
+                $nb = max(
+                    $this->NbLines($w[0], $title),
+                    $this->NbLines($w[1], $mdate),
+                    $this->NbLines($w[2], $time),
+                    $this->NbLines($w[3], $platform),
+                    $this->NbLines($w[4], $link),
+                    1
+                );
+                $h = 6 * $nb;
                 
-                // Check page break
-                $this->CheckPageBreak($h);
+                // Page break check — reprint header if needed
+                if($this->GetY() + $h > $this->PageBreakTrigger) {
+                    $this->AddPage($this->CurOrientation);
+                    $this->SetFillColor(30, 60, 114);
+                    $this->SetTextColor(255);
+                    $this->SetFont('Arial', 'B', 10);
+                    for($i = 0; $i < count($header); $i++) {
+                        $this->Cell($w[$i], 7, $header[$i], 1, 0, 'C', true);
+                    }
+                    $this->Ln();
+                    $this->SetTextColor(0);
+                    $this->SetFont('Arial', '', 9);
+                }
                 
                 $x = $this->GetX();
                 $y = $this->GetY();
+                $fillMode = $fill ? 'FD' : 'D';
                 
-                // Draw cells
-                $this->Rect($x, $y, $w[0], $h, $fill ? 'F' : '');
-                $this->MultiCell($w[0], 6, $title, 0, 'L');
-                $this->SetXY($x + $w[0], $y);
+                if($fill) $this->SetFillColor(248, 249, 250);
                 
-                $this->Rect($x + $w[0], $y, $w[1], $h, $fill ? 'F' : '');
-                $this->MultiCell($w[1], 6, $mdate, 0, 'L');
-                $this->SetXY($x + $w[0] + $w[1], $y);
+                // Meeting Title
+                $this->Rect($x, $y, $w[0], $h, $fillMode);
+                $this->SetXY($x + 1, $y + 1);
+                $this->MultiCell($w[0] - 2, 6, $title, 0, 'L');
                 
-                $this->Rect($x + $w[0] + $w[1], $y, $w[2], $h, $fill ? 'F' : '');
-                $this->MultiCell($w[2], 6, $time, 0, 'L');
-                $this->SetXY($x + $w[0] + $w[1] + $w[2], $y);
+                // Date
+                $this->Rect($x + $w[0], $y, $w[1], $h, $fillMode);
+                $this->SetXY($x + $w[0] + 1, $y + 1);
+                $this->MultiCell($w[1] - 2, 6, $mdate, 0, 'L');
                 
-                $this->Rect($x + $w[0] + $w[1] + $w[2], $y, $w[3], $h, $fill ? 'F' : '');
-                $this->MultiCell($w[3], 6, $platform, 0, 'L');
-                $this->SetXY($x + $w[0] + $w[1] + $w[2] + $w[3], $y);
-
-                $this->Rect($x + $w[0] + $w[1] + $w[2] + $w[3], $y, $w[4], $h, $fill ? 'F' : '');
-                $this->MultiCell($w[4], 6, $link, 0, 'L');
+                // Time
+                $this->Rect($x + $w[0] + $w[1], $y, $w[2], $h, $fillMode);
+                $this->SetXY($x + $w[0] + $w[1] + 1, $y + 1);
+                $this->MultiCell($w[2] - 2, 6, $time, 0, 'L');
                 
-                $this->Ln($h);
+                // Platform
+                $this->Rect($x + $w[0] + $w[1] + $w[2], $y, $w[3], $h, $fillMode);
+                $this->SetXY($x + $w[0] + $w[1] + $w[2] + 1, $y + 1);
+                $this->MultiCell($w[3] - 2, 6, $platform, 0, 'L');
+                
+                // Link / Details (full text)
+                $this->Rect($x + $w[0] + $w[1] + $w[2] + $w[3], $y, $w[4], $h, $fillMode);
+                $this->SetXY($x + $w[0] + $w[1] + $w[2] + $w[3] + 1, $y + 1);
+                $this->MultiCell($w[4] - 2, 6, $link, 0, 'L');
+                
+                $this->SetXY($x, $y + $h);
                 $fill = !$fill;
             }
-            $this->Cell(array_sum($w), 0, '', 'T');
         }
         
         function NbLines($w, $txt) {

@@ -458,6 +458,20 @@ $sort = isset($_GET['sort']) ? $_GET['sort'] : 'deadline';
             background: rgba(255,255,255,0.3);
             transform: translateY(-2px);
         }
+        .btn-backup {
+            background: rgba(34, 197, 94, 0.25);
+            color: white;
+            border: 1px solid rgba(34, 197, 94, 0.45);
+            backdrop-filter: blur(10px);
+            display: flex;
+            align-items: center;
+            gap: 6px;
+        }
+        .btn-backup:hover {
+            background: rgba(34, 197, 94, 0.45);
+            transform: translateY(-2px);
+            box-shadow: 0 4px 12px rgba(34,197,94,0.3);
+        }
         .container {
             max-width: 1400px;
             margin: 30px auto;
@@ -1258,6 +1272,9 @@ $sort = isset($_GET['sort']) ? $_GET['sort'] : 'deadline';
                         <!-- <div class="role">Administrator</div> -->
                     </div>
                 </div>
+                <a href="export_sql_dump.php" class="btn btn-backup" title="Download full SQL backup of the database">
+                    <span>🗄️</span> DB Backup
+                </a>
                 <a href="logout.php" class="btn btn-logout">Logout</a>
             </div>
         </div>

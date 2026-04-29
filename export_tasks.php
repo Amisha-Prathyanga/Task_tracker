@@ -90,44 +90,50 @@ if ($format === 'pdf') {
             // Colors
             $this->SetFillColor(30, 60, 114);
             $this->SetTextColor(255);
-            $this->SetDrawColor(200, 200, 200);
+            $this->SetDrawColor(128, 128, 128);
             $this->SetLineWidth(.3);
             $this->SetFont('Arial', 'B', 9);
             
-            // Header
-            $w = array(30, 35, 75, 20, 25, 25, 15); // Adjusted widths
+            // Column widths: Date, Project, Task Description, Priority, Deadline, Status, Progress
+            $w = array(30, 35, 75, 20, 25, 25, 15);
+            
+            // Header row
             for($i = 0; $i < count($header); $i++) {
                 $this->Cell($w[$i], 7, $header[$i], 1, 0, 'C', true);
             }
             $this->Ln();
             
-            // Data
-            $this->SetFillColor(248, 249, 250);
+            // Data rows
             $this->SetTextColor(0);
             $this->SetFont('Arial', '', 8);
-            
             $fill = false;
+            
             foreach($data as $row) {
-                // Sanitize and Encode Data
-                $date = iconv('UTF-8', 'ISO-8859-1//TRANSLIT', $row['date']);
-                $project = iconv('UTF-8', 'ISO-8859-1//TRANSLIT', $row['project']);
-                $task = iconv('UTF-8', 'ISO-8859-1//TRANSLIT', $row['task']);
-                $priority = iconv('UTF-8', 'ISO-8859-1//TRANSLIT', $row['priority']);
-                $deadline = iconv('UTF-8', 'ISO-8859-1//TRANSLIT', $row['deadline']);
-                $status = iconv('UTF-8', 'ISO-8859-1//TRANSLIT', $row['status']);
-                $completion = str_replace('%', '', $row['completion']) . '%'; // Ensure single %
+                // Sanitize and encode
+                $date       = iconv('UTF-8', 'ISO-8859-1//TRANSLIT//IGNORE', $row['date']);
+                $project    = iconv('UTF-8', 'ISO-8859-1//TRANSLIT//IGNORE', $row['project']);
+                $task       = iconv('UTF-8', 'ISO-8859-1//TRANSLIT//IGNORE', $row['task']);
+                $priority   = iconv('UTF-8', 'ISO-8859-1//TRANSLIT//IGNORE', $row['priority']);
+                $deadline   = iconv('UTF-8', 'ISO-8859-1//TRANSLIT//IGNORE', $row['deadline']);
+                $status     = iconv('UTF-8', 'ISO-8859-1//TRANSLIT//IGNORE', $row['status']);
+                $completion = str_replace('%', '', $row['completion']) . '%';
 
-                // Calculate max height for this row based on all wrapping columns
-                $nb1 = $this->NbLines($w[1], $project);
-                $nb2 = $this->NbLines($w[2], $task);
-                $nb = max($nb1, $nb2);
+                // Calculate row height based on tallest wrapping column
+                $nb = max(
+                    $this->NbLines($w[0], $date),
+                    $this->NbLines($w[1], $project),
+                    $this->NbLines($w[2], $task),
+                    $this->NbLines($w[3], $priority),
+                    $this->NbLines($w[4], $deadline),
+                    $this->NbLines($w[5], $status),
+                    $this->NbLines($w[6], $completion),
+                    1
+                );
                 $h = 6 * $nb;
                 
-                // Check page break
+                // Page break check — reprint header if needed
                 if($this->GetY() + $h > $this->PageBreakTrigger) {
                     $this->AddPage($this->CurOrientation);
-                    
-                    // Re-print header
                     $this->SetFillColor(30, 60, 114);
                     $this->SetTextColor(255);
                     $this->SetFont('Arial', 'B', 9);
@@ -135,55 +141,60 @@ if ($format === 'pdf') {
                         $this->Cell($w[$i], 7, $header[$i], 1, 0, 'C', true);
                     }
                     $this->Ln();
-                    
-                    $this->SetFillColor(248, 249, 250);
                     $this->SetTextColor(0);
                     $this->SetFont('Arial', '', 8);
                 }
                 
-                // Draw cells
                 $x = $this->GetX();
                 $y = $this->GetY();
+                $fillMode = $fill ? 'FD' : 'D';
                 
-                $this->Rect($x, $y, $w[0], $h, $fill ? 'F' : '');
-                $this->MultiCell($w[0], 6, $date, 0, 'L');
-                $this->SetXY($x + $w[0], $y);
+                if($fill) $this->SetFillColor(248, 249, 250);
                 
-                $this->Rect($x + $w[0], $y, $w[1], $h, $fill ? 'F' : '');
-                $this->MultiCell($w[1], 6, $project, 0, 'L');
-                $this->SetXY($x + $w[0] + $w[1], $y);
+                // Date
+                $this->Rect($x, $y, $w[0], $h, $fillMode);
+                $this->SetXY($x + 1, $y + 1);
+                $this->MultiCell($w[0] - 2, 6, $date, 0, 'L');
                 
-                $this->Rect($x + $w[0] + $w[1], $y, $w[2], $h, $fill ? 'F' : '');
-                $this->MultiCell($w[2], 6, $task, 0, 'L');
-                $this->SetXY($x + $w[0] + $w[1] + $w[2], $y);
+                // Project
+                $this->Rect($x + $w[0], $y, $w[1], $h, $fillMode);
+                $this->SetXY($x + $w[0] + 1, $y + 1);
+                $this->MultiCell($w[1] - 2, 6, $project, 0, 'L');
                 
-                // Priority color
-                $color = $this->getPriorityColor($row['priority']); // Use original key for logic
-                $this->SetTextColor($color[0], $color[1], $color[2]);
-                $this->Rect($x + array_sum(array_slice($w, 0, 3)), $y, $w[3], $h, $fill ? 'F' : '');
-                $this->MultiCell($w[3], 6, $priority, 0, 'C');
+                // Task Description (full text, no truncation)
+                $this->Rect($x + $w[0] + $w[1], $y, $w[2], $h, $fillMode);
+                $this->SetXY($x + $w[0] + $w[1] + 1, $y + 1);
+                $this->MultiCell($w[2] - 2, 6, $task, 0, 'L');
+                
+                // Priority (colored text)
+                $pColor = $this->getPriorityColor($row['priority']);
+                $this->Rect($x + $w[0] + $w[1] + $w[2], $y, $w[3], $h, $fillMode);
+                $this->SetTextColor($pColor[0], $pColor[1], $pColor[2]);
+                $this->SetXY($x + $w[0] + $w[1] + $w[2] + 1, $y + 1);
+                $this->MultiCell($w[3] - 2, 6, $priority, 0, 'C');
                 $this->SetTextColor(0);
-                $this->SetXY($x + array_sum(array_slice($w, 0, 4)), $y);
                 
-                $this->Rect($x + array_sum(array_slice($w, 0, 4)), $y, $w[4], $h, $fill ? 'F' : '');
-                $this->MultiCell($w[4], 6, $deadline, 0, 'L');
-                $this->SetXY($x + array_sum(array_slice($w, 0, 5)), $y);
+                // Deadline
+                $this->Rect($x + $w[0] + $w[1] + $w[2] + $w[3], $y, $w[4], $h, $fillMode);
+                $this->SetXY($x + $w[0] + $w[1] + $w[2] + $w[3] + 1, $y + 1);
+                $this->MultiCell($w[4] - 2, 6, $deadline, 0, 'L');
                 
-                // Status color
-                $color = $this->getStatusColor($row['status']); // Use original key for logic
-                $this->SetTextColor($color[0], $color[1], $color[2]);
-                $this->Rect($x + array_sum(array_slice($w, 0, 5)), $y, $w[5], $h, $fill ? 'F' : '');
-                $this->MultiCell($w[5], 6, $status, 0, 'C');
+                // Status (colored text)
+                $sColor = $this->getStatusColor($row['status']);
+                $this->Rect($x + $w[0] + $w[1] + $w[2] + $w[3] + $w[4], $y, $w[5], $h, $fillMode);
+                $this->SetTextColor($sColor[0], $sColor[1], $sColor[2]);
+                $this->SetXY($x + $w[0] + $w[1] + $w[2] + $w[3] + $w[4] + 1, $y + 1);
+                $this->MultiCell($w[5] - 2, 6, $status, 0, 'C');
                 $this->SetTextColor(0);
-                $this->SetXY($x + array_sum(array_slice($w, 0, 6)), $y);
                 
-                $this->Rect($x + array_sum(array_slice($w, 0, 6)), $y, $w[6], $h, $fill ? 'F' : '');
-                $this->MultiCell($w[6], 6, $completion, 0, 'C');
+                // Completion
+                $this->Rect($x + $w[0] + $w[1] + $w[2] + $w[3] + $w[4] + $w[5], $y, $w[6], $h, $fillMode);
+                $this->SetXY($x + $w[0] + $w[1] + $w[2] + $w[3] + $w[4] + $w[5] + 1, $y + 1);
+                $this->MultiCell($w[6] - 2, 6, $completion, 0, 'C');
                 
-                $this->Ln($h);
+                $this->SetXY($x, $y + $h);
                 $fill = !$fill;
             }
-            $this->Cell(array_sum($w), 0, '', 'T');
         }
 
         function NbLines($w, $txt) {

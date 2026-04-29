@@ -100,42 +100,46 @@ if ($format === 'pdf') {
             // Colors
             $this->SetFillColor(156, 39, 176); // Purple
             $this->SetTextColor(255);
-            $this->SetDrawColor(200, 200, 200);
+            $this->SetDrawColor(128, 128, 128);
             $this->SetLineWidth(.3);
             $this->SetFont('Arial', 'B', 9);
             
-            // Header
-            $w = array(50, 45, 30, 25, 115); // Job Title, Company, Date, Work Mode, Description
+            // Column widths: Job Title, Company, Date Applied, Work Mode, Description
+            $w = array(50, 45, 30, 25, 115);
+            
+            // Header row
             for($i = 0; $i < count($header); $i++) {
                 $this->Cell($w[$i], 7, $header[$i], 1, 0, 'C', true);
             }
             $this->Ln();
             
-            // Data
-            $this->SetFillColor(248, 249, 250);
+            // Data rows
             $this->SetTextColor(0);
             $this->SetFont('Arial', '', 8);
-            
             $fill = false;
+            
             foreach($data as $row) {
-                // Sanitize and Encode Data
-                $jobTitle = iconv('UTF-8', 'ISO-8859-1//TRANSLIT', $row['job_title']);
-                $company = iconv('UTF-8', 'ISO-8859-1//TRANSLIT', $row['company']);
-                $dateApplied = iconv('UTF-8', 'ISO-8859-1//TRANSLIT', $row['date_applied']);
-                $workMode = iconv('UTF-8', 'ISO-8859-1//TRANSLIT', $row['work_mode']);
-                $description = iconv('UTF-8', 'ISO-8859-1//TRANSLIT', substr($row['job_description'], 0, 200)); // Limit description length
+                // Sanitize and encode (full description, no truncation)
+                $jobTitle    = iconv('UTF-8', 'ISO-8859-1//TRANSLIT//IGNORE', $row['job_title']);
+                $company     = iconv('UTF-8', 'ISO-8859-1//TRANSLIT//IGNORE', $row['company']);
+                $dateApplied = iconv('UTF-8', 'ISO-8859-1//TRANSLIT//IGNORE', $row['date_applied']);
+                $workMode    = iconv('UTF-8', 'ISO-8859-1//TRANSLIT//IGNORE', $row['work_mode']);
+                $description = iconv('UTF-8', 'ISO-8859-1//TRANSLIT//IGNORE', $row['job_description']);
 
-                // Calculate max height for this row
-                $nb1 = $this->NbLines($w[0], $jobTitle);
-                $nb2 = $this->NbLines($w[4], $description);
-                $nb = max($nb1, $nb2, 1);
+                // Calculate row height based on tallest wrapping column
+                $nb = max(
+                    $this->NbLines($w[0], $jobTitle),
+                    $this->NbLines($w[1], $company),
+                    $this->NbLines($w[2], $dateApplied),
+                    $this->NbLines($w[3], $workMode),
+                    $this->NbLines($w[4], $description),
+                    1
+                );
                 $h = 6 * $nb;
                 
-                // Check page break
+                // Page break check — reprint header if needed
                 if($this->GetY() + $h > $this->PageBreakTrigger) {
                     $this->AddPage($this->CurOrientation);
-                    
-                    // Re-print header
                     $this->SetFillColor(156, 39, 176);
                     $this->SetTextColor(255);
                     $this->SetFont('Arial', 'B', 9);
@@ -143,43 +147,47 @@ if ($format === 'pdf') {
                         $this->Cell($w[$i], 7, $header[$i], 1, 0, 'C', true);
                     }
                     $this->Ln();
-                    
-                    $this->SetFillColor(248, 249, 250);
                     $this->SetTextColor(0);
                     $this->SetFont('Arial', '', 8);
                 }
                 
-                // Draw cells
                 $x = $this->GetX();
                 $y = $this->GetY();
+                $fillMode = $fill ? 'FD' : 'D';
                 
-                $this->Rect($x, $y, $w[0], $h, $fill ? 'F' : '');
-                $this->MultiCell($w[0], 6, $jobTitle, 0, 'L');
-                $this->SetXY($x + $w[0], $y);
+                if($fill) $this->SetFillColor(248, 249, 250);
                 
-                $this->Rect($x + $w[0], $y, $w[1], $h, $fill ? 'F' : '');
-                $this->MultiCell($w[1], 6, $company, 0, 'L');
-                $this->SetXY($x + $w[0] + $w[1], $y);
+                // Job Title
+                $this->Rect($x, $y, $w[0], $h, $fillMode);
+                $this->SetXY($x + 1, $y + 1);
+                $this->MultiCell($w[0] - 2, 6, $jobTitle, 0, 'L');
                 
-                $this->Rect($x + $w[0] + $w[1], $y, $w[2], $h, $fill ? 'F' : '');
-                $this->MultiCell($w[2], 6, $dateApplied, 0, 'C');
-                $this->SetXY($x + $w[0] + $w[1] + $w[2], $y);
+                // Company
+                $this->Rect($x + $w[0], $y, $w[1], $h, $fillMode);
+                $this->SetXY($x + $w[0] + 1, $y + 1);
+                $this->MultiCell($w[1] - 2, 6, $company, 0, 'L');
                 
-                // Work Mode color
-                $color = $this->getWorkModeColor($row['work_mode']);
-                $this->SetTextColor($color[0], $color[1], $color[2]);
-                $this->Rect($x + $w[0] + $w[1] + $w[2], $y, $w[3], $h, $fill ? 'F' : '');
-                $this->MultiCell($w[3], 6, $workMode, 0, 'C');
+                // Date Applied
+                $this->Rect($x + $w[0] + $w[1], $y, $w[2], $h, $fillMode);
+                $this->SetXY($x + $w[0] + $w[1] + 1, $y + 1);
+                $this->MultiCell($w[2] - 2, 6, $dateApplied, 0, 'C');
+                
+                // Work Mode (colored text)
+                $wmColor = $this->getWorkModeColor($row['work_mode']);
+                $this->Rect($x + $w[0] + $w[1] + $w[2], $y, $w[3], $h, $fillMode);
+                $this->SetTextColor($wmColor[0], $wmColor[1], $wmColor[2]);
+                $this->SetXY($x + $w[0] + $w[1] + $w[2] + 1, $y + 1);
+                $this->MultiCell($w[3] - 2, 6, $workMode, 0, 'C');
                 $this->SetTextColor(0);
-                $this->SetXY($x + $w[0] + $w[1] + $w[2] + $w[3], $y);
                 
-                $this->Rect($x + $w[0] + $w[1] + $w[2] + $w[3], $y, $w[4], $h, $fill ? 'F' : '');
-                $this->MultiCell($w[4], 6, $description, 0, 'L');
+                // Job Description (full text)
+                $this->Rect($x + $w[0] + $w[1] + $w[2] + $w[3], $y, $w[4], $h, $fillMode);
+                $this->SetXY($x + $w[0] + $w[1] + $w[2] + $w[3] + 1, $y + 1);
+                $this->MultiCell($w[4] - 2, 6, $description, 0, 'L');
                 
-                $this->Ln($h);
+                $this->SetXY($x, $y + $h);
                 $fill = !$fill;
             }
-            $this->Cell(array_sum($w), 0, '', 'T');
         }
 
         function NbLines($w, $txt) {
